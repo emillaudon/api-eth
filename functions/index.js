@@ -45,12 +45,14 @@ const HDWalletProvider = require("truffle-hdwallet-provider");
 const admin = require("firebase-admin");
 admin.initializeApp();
 const app = express();
-const authMiddleware = require('./authMiddleware');
+const authMiddleware = require("./authMiddleware");
+const { firestore } = require("firebase-admin");
 app.use(authMiddleware);
 
 //////////////////////////////////////////////
 ////////// Performing Transactions ///////////
 /////////////////////////////////////////////
+
 app.post("/:userID/send/", async (req, res) => {
   var userID = req.params.userID;
   var transactionData = await performTransaction(req);
@@ -58,7 +60,7 @@ app.post("/:userID/send/", async (req, res) => {
   await admin
     .firestore()
     .collection("users")
-    .doc("userID")
+    .doc(userID)
     .collection("wallets")
     .doc(transactionData.sendingAddress)
     .collection("transactions")
@@ -71,6 +73,7 @@ app.post("/:userID/send/", async (req, res) => {
 });
 
 performTransaction = async (req) => {
+  const userID = req.params.userID;
   const providedMnemonic = req.body.mnemonic;
   const sendingWalletNumber = req.body.walletNumber;
   const recipient = req.body.recipient;
@@ -101,7 +104,11 @@ performTransaction = async (req) => {
     }
   );
 
-  const newBalance = await getBalance(providedMnemonic, sendingWalletNumber);
+  const newBalance = await getBalance(
+    providedMnemonic,
+    userID,
+    sendingWalletNumber
+  );
 
   return (docData = {
     receivingAddress: recipient,
@@ -114,7 +121,7 @@ performTransaction = async (req) => {
   });
 };
 
-getBalance = async (mnemonic, walletNumber) => {
+getBalance = async (mnemonic, userID, walletNumber) => {
   const provider = new HDWalletProvider(
     mnemonic,
     "https://rinkeby.infura.io/v3/941246d7df7947e58393691a1be5455e",
@@ -134,11 +141,11 @@ getBalance = async (mnemonic, walletNumber) => {
     }
   });
   const balanceInEth = web3.utils.fromWei(balance, "ether");
-  saveBalance(balanceInEth, accounts[walletNumber]);
+  saveBalance(balanceInEth, userID, accounts[walletNumber]);
   return balanceInEth;
 };
 
-saveBalance = async (balance, sendingAddress) => {
+saveBalance = async (balance, userID, sendingAddress) => {
   balanceData = {
     balance: balance,
     time: Date.now(),
@@ -147,7 +154,7 @@ saveBalance = async (balance, sendingAddress) => {
   await admin
     .firestore()
     .collection("users")
-    .doc("userID")
+    .doc(userID)
     .collection("wallets")
     .doc(sendingAddress)
     .collection("balances")
@@ -180,7 +187,8 @@ app.get("/wallets/:userID", async (req, res) => {
 //////////////////////////////////////////////
 /////// Change Name Of Wallet ////////////////
 /////////////////////////////////////////////
-app.put("/wallets/changeName/:walletAddress", async (req, res) => {
+app.put("/:userID/wallets/changeName/:walletAddress", async (req, res) => {
+  const userID = req.params.userID;
   const walletAddress = req.params.walletAddress;
   const newName = req.body.newName;
 
@@ -191,7 +199,7 @@ app.put("/wallets/changeName/:walletAddress", async (req, res) => {
   await admin
     .firestore()
     .collection("users")
-    .doc("userID")
+    .doc(userID)
     .collection("wallets")
     .doc(walletAddress)
     .update({ nameData });
@@ -210,7 +218,7 @@ app.post("/wallets/createWallet/:userID", async (req, res) => {
   const snapshot = await admin
     .firestore()
     .collection("users")
-    .doc("userID")
+    .doc(userID)
     .collection("wallets")
     .get();
 
@@ -246,7 +254,7 @@ app.post("/wallets/createWallet/:userID", async (req, res) => {
     mnemonic: providedMnemonic,
   };
 
-  getBalance(providedMnemonic, walletCount);
+  getBalance(providedMnemonic, userID, walletCount);
 
   await admin
     .firestore()
@@ -256,7 +264,7 @@ app.post("/wallets/createWallet/:userID", async (req, res) => {
     .doc(walletAddress)
     .set({ nameData, numberData, mnemonicData });
 
-  getBalance(providedMnemonic, walletCount);
+  getBalance(providedMnemonic, userID, walletCount);
 
   res.status(200).send(JSON.stringify(returnData));
 });
@@ -264,13 +272,14 @@ app.post("/wallets/createWallet/:userID", async (req, res) => {
 ///////////////////////////////////////////////////////
 /////// Get Transactions from Specific Wallet /////////
 ///////////////////////////////////////////////////////
-app.get("/transactions/:walletNumber/:mnemonic", async (req, res) => {
+app.get("/:userID/transactions/:walletNumber/:mnemonic", async (req, res) => {
+  let userID = req.params.userID;
   let walletNumber = req.params.walletNumber;
   let mnemonic = req.params.mnemonic;
   walletNumber = parseInt(walletNumber);
 
-  getTransactionsFromEtherScan(mnemonic, walletNumber);
-  getBalance(mnemonic, walletNumber);
+  getTransactionsFromEtherScan(mnemonic, userID, walletNumber);
+  getBalance(mnemonic, userID, walletNumber);
 
   const provider = new HDWalletProvider(
     mnemonic,
@@ -285,7 +294,7 @@ app.get("/transactions/:walletNumber/:mnemonic", async (req, res) => {
   const snapshot = await admin
     .firestore()
     .collection("users")
-    .doc("userID")
+    .doc(userID)
     .collection("wallets")
     .doc(account)
     .collection("transactions")
@@ -305,7 +314,7 @@ app.get("/transactions/:walletNumber/:mnemonic", async (req, res) => {
   }
 });
 
-getTransactionsFromEtherScan = async (mnemonic, walletNumber) => {
+getTransactionsFromEtherScan = async (mnemonic, userID, walletNumber) => {
   let body = "";
   const provider = new HDWalletProvider(
     mnemonic,
@@ -350,7 +359,7 @@ getTransactionsFromEtherScan = async (mnemonic, walletNumber) => {
             await admin
               .firestore()
               .collection("users")
-              .doc("userID")
+              .doc(userID)
               .collection("wallets")
               .doc(account)
               .collection("transactions")
@@ -367,12 +376,13 @@ getTransactionsFromEtherScan = async (mnemonic, walletNumber) => {
 /////////////////////////////////////////////////////
 /////////// Get Balance Of Specific Wallet //////////
 ////////////////////////////////////////////////////
-app.get("/balance/:walletAddress", async (req, res) => {
+app.get("/:userID/balance/:walletAddress", async (req, res) => {
+  const userID = req.params.userID;
   const walletAddress = req.params.walletAddress;
   const doc = await admin
     .firestore()
     .collection("users")
-    .doc("userID")
+    .doc(userID)
     .collection("wallets")
     .doc(walletAddress)
     .collection("balances")
@@ -387,13 +397,14 @@ app.get("/balance/:walletAddress", async (req, res) => {
 //////////////////////////////////////////////////////////
 ////////////Delete a Wallet//////////////////////////////
 ////////////////////////////////////////////////////////
-app.delete("/wallets/:walletAddress", async (req, res) => {
+app.delete("/:userID/wallets/:walletAddress", async (req, res) => {
+  const userID = req.params.userID;
   const walletAddress = req.params.walletAddress;
 
   await admin
     .firestore()
     .collection("users")
-    .doc("userID")
+    .doc(userID)
     .collection("wallets")
     .doc(walletAddress)
     .delete();
@@ -404,7 +415,8 @@ app.delete("/wallets/:walletAddress", async (req, res) => {
 //////////////////////////////////////////////////////////
 /////////// Update Note of Specific Transaction //////////
 /////////////////////////////////////////////////////////
-app.put("/updateNote", async (req, res) => {
+app.put("/:userID/updateNote", async (req, res) => {
+  const userID = req.params.userID;
   const address = req.body.address;
   const hash = req.body.hash;
   const note = req.body.note;
@@ -412,7 +424,7 @@ app.put("/updateNote", async (req, res) => {
   await admin
     .firestore()
     .collection("users")
-    .doc("userID")
+    .doc(userID)
     .collection("wallets")
     .doc(address)
     .collection("transactions")
@@ -440,12 +452,13 @@ app.get("/:id", async (req, res) => {
   res.status(200).send(JSON.stringify({ id: userId, ...userData }));
 });
 
-app.get("/getTransactions/:walletNumber/:mnemonic", async (req, res) => {
+app.get("/:userID/getTransactions/:walletNumber/:mnemonic", async (req, res) => {
+  let userID = req.params.userID;
   let walletNumber = req.params.walletNumber;
-  let mnemonic = req.params.mnemonic
+  let mnemonic = req.params.mnemonic;
   walletNumber = parseInt(walletNumber);
 
-  await getBalance(mnemonic, walletNumber);
+  await getBalance(mnemonic, userID, walletNumber);
   let body = await getTransactionsFromEtherScan(mnemonic, walletNumber);
 
   res.status(200).send(JSON.stringify(body));
