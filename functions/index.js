@@ -45,6 +45,8 @@ const HDWalletProvider = require("truffle-hdwallet-provider");
 const admin = require("firebase-admin");
 admin.initializeApp();
 const app = express();
+const authMiddleware = require('./authMiddleware');
+app.use(authMiddleware);
 
 //////////////////////////////////////////////
 ////////// Performing Transactions ///////////
